@@ -14,7 +14,7 @@ class R2A_PANDA(IR2A):
         self.historico_rtt = [] #historico de RTT para cálculos do algoritmo
         self.qualidades = []
         self.id_qualidade_selecionada = 0
-        self.tempo_ate_pedido  = 0
+        self.tempo_ate_pedido  = []
 
     def retorna_tamanho_buffer(self):
         lista_buffers = self.whiteboard.get_playback_buffer_size()
@@ -27,8 +27,8 @@ class R2A_PANDA(IR2A):
 
     def estimar_vazao_alvo(self):
         k = 3 #taxa de convergência de sondagem
-        w = 5 #taxa de aumento aditivo
-        T_anterior = self.historico_rtt[-1]
+        w = 1000 #taxa de aumento aditivo
+        T_anterior = self.tempo_ate_pedido[-1]
         vazao_calculada_anterior = self.vazoes[-1]
         
         if len(self.vazoes_alvo):
@@ -41,11 +41,11 @@ class R2A_PANDA(IR2A):
         
         return vazao_estimada
 
-    def suavizar_estimativa(self):
+    def suavizar_estimativa(self, vazao_estimada):
         while len(self.vazoes_alvo) > 5:
             self.vazoes_alvo.pop(0)
 
-        estimativa_suavizada = mean(self.vazoes_alvo)
+        estimativa_suavizada = (mean(self.vazoes_alvo) + vazao_estimada) / 2
 
         return estimativa_suavizada
 
@@ -68,12 +68,13 @@ class R2A_PANDA(IR2A):
         tempo_estimado = ((qualidade_selecionada * t_segmento)/estimativa_suavizada) + ( beta * (ultimo_buffer - buffer_minimo))
 
         if tempo_estimado > 0:
-            return tempo_estimado
+            self.tempo_ate_pedido.append(tempo_estimado)
         else:
-            return 0
+            self.tempo_ate_pedido.append(0.1)
 
     def handle_xml_request(self, msg):
         self.tempo_requisicao = time.perf_counter()
+        time.sleep(self.tempo_ate_pedido[-1])
         self.send_down(msg)
 
     def handle_xml_response(self, msg):
@@ -95,12 +96,12 @@ class R2A_PANDA(IR2A):
         vazao_estimada = self.estimar_vazao_alvo()
         print(vazao_estimada)
         #2) Suavizar a estimativa de banda
-        vazao_suavizada = self.suavizar_estimativa()
+        vazao_suavizada = self.suavizar_estimativa(vazao_estimada)
         print(vazao_suavizada)
         #3) Quantificar taxa de bits discreta pedida
         qualidade_selecionada = self.corresponder_qualidade(vazao_suavizada)
         #4) Planejar tempo até enviar a próxima requisição
-        tempo_ate_pedido = self.planejar_intervalo_download(qualidade_selecionada,vazao_suavizada)
+        self.planejar_intervalo_download(qualidade_selecionada,vazao_suavizada)
 
         self.tempo_requisicao = time.perf_counter()
         buffer_atual = self.retorna_tamanho_buffer()
@@ -112,12 +113,14 @@ class R2A_PANDA(IR2A):
     def handle_segment_size_response(self, msg):
         rtt = time.perf_counter() - self.tempo_requisicao
         self.vazoes.append(msg.get_bit_length() / rtt)
-        time.sleep(self.tempo_ate_pedido)
+        #time.sleep(self.tempo_ate_pedido)
         self.send_up(msg)
 
 
     def initialize(self):
-        pass
+        #inicializando o tempo de espera para requisitos
+        self.tempo_ate_pedido.append(1)
+        self.tempo_ate_pedido.append(1)
 
     def finalization(self):
         pass
