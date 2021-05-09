@@ -14,6 +14,7 @@ class R2A_PANDA(IR2A):
         self.historico_rtt = [] #historico de RTT para cálculos do algoritmo
         self.qualidades = []
         self.id_qualidade_selecionada = 0
+        self.tempo_ate_pedido  = 0
 
     def retorna_tamanho_buffer(self):
         lista_buffers = self.whiteboard.get_playback_buffer_size()
@@ -105,12 +106,13 @@ class R2A_PANDA(IR2A):
         buffer_atual = self.retorna_tamanho_buffer()
 
         msg.add_quality_id(qualidade_selecionada)
-        time.sleep(tempo_ate_pedido)
+        #time.sleep(tempo_ate_pedido)
         self.send_down(msg)
 
     def handle_segment_size_response(self, msg):
         rtt = time.perf_counter() - self.tempo_requisicao
         self.vazoes.append(msg.get_bit_length() / rtt)
+        time.sleep(self.tempo_ate_pedido)
         self.send_up(msg)
 
 
