@@ -10,6 +10,7 @@ class R2A_PANDA(IR2A):
         IR2A.__init__(self, id)
         self.vazoes = [] #vazões estimadas
         self.vazoes_alvo = [] #vazões alvo obtidas a partir do calculo do algoritmo PANDA
+        self.vazoes_alvo_suavizadas = [] #vazões alvo obtidas a partir do calculo do algoritmo PANDA
         self.tempo_requisicao = 0
         self.historico_rtt = [] #historico de RTT para cálculos do algoritmo
         self.qualidades = []
@@ -26,15 +27,19 @@ class R2A_PANDA(IR2A):
             return 0
 
     def estimar_vazao_alvo(self):
-        k = 3 #taxa de convergência de sondagem
-        w = 1000 #taxa de aumento aditivo
-        T_anterior = self.tempo_ate_pedido[-1]
-        vazao_calculada_anterior = self.vazoes[-1]
+        k = 0.14 #taxa de convergência de sondagem
+        w = 0.3 #taxa de aumento aditivo
+        T_anterior = self.historico_rtt[-1]
         
-        if len(self.vazoes_alvo):
+        if len(self.vazoes_alvo) > 1:
             vazao_estimada_anterior = self.vazoes_alvo[-1]
         else:
-            vazao_estimada_anterior = self.vazoes[-1] #Analisar ainda o que devo botar aqui
+            vazao_estimada_anterior = self.vazoes[0] #Analisar ainda o que devo botar aqui
+
+        if len(self.vazoes_alvo_suavizadas) > 1:
+            vazao_calculada_anterior = self.vazoes_alvo_suavizadas[-1]
+        else:
+            vazao_calculada_anterior = vazao_estimada_anterior #Analisar ainda o que devo botar aqui
 
         vazao_estimada = ((k * (w - max(0,vazao_estimada_anterior - vazao_calculada_anterior + w))) * T_anterior) + vazao_estimada_anterior
         self.vazoes_alvo.append(vazao_estimada)
@@ -46,6 +51,7 @@ class R2A_PANDA(IR2A):
             self.vazoes_alvo.pop(0)
 
         estimativa_suavizada = (mean(self.vazoes_alvo) + vazao_estimada) / 2
+        self.vazoes_alvo_suavizadas.append(estimativa_suavizada)
 
         return estimativa_suavizada
 
@@ -60,7 +66,7 @@ class R2A_PANDA(IR2A):
 
     #Relacionado ao traffic_shapping_interval
     def planejar_intervalo_download(self,qualidade_selecionada,estimativa_suavizada):
-        beta = 0.5 #taxa de convergência
+        beta = 0.2 #taxa de convergência
         ultimo_buffer = self.retorna_tamanho_buffer()
         buffer_minimo = 0
         t_segmento = 1 # 1 segundo de duração do segmento de vídeo
@@ -70,7 +76,7 @@ class R2A_PANDA(IR2A):
         if tempo_estimado > 0:
             self.tempo_ate_pedido.append(tempo_estimado)
         else:
-            self.tempo_ate_pedido.append(0.1)
+            self.tempo_ate_pedido.append(1)
 
     def handle_xml_request(self, msg):
         self.tempo_requisicao = time.perf_counter()
@@ -92,18 +98,23 @@ class R2A_PANDA(IR2A):
 
     def handle_segment_size_request(self, msg):
 
+        print("\n\n==================================")
+        print("===== Primeira Vazao: ",self.vazoes[0])
         #1) estimar a alocação de banda a se pedir na requisição
         vazao_estimada = self.estimar_vazao_alvo()
-        print(vazao_estimada)
+        print("===== Vazao estimada: ",vazao_estimada)
         #2) Suavizar a estimativa de banda
         vazao_suavizada = self.suavizar_estimativa(vazao_estimada)
-        print(vazao_suavizada)
+        print("===== Vazao suavizada: ",vazao_suavizada)
         #3) Quantificar taxa de bits discreta pedida
         qualidade_selecionada = self.corresponder_qualidade(vazao_suavizada)
+        print("===== Qualidade Selecionada: ", qualidade_selecionada)
         #4) Planejar tempo até enviar a próxima requisição
         self.planejar_intervalo_download(qualidade_selecionada,vazao_suavizada)
+        print("===== Tempo ate pedido: ", self.tempo_ate_pedido[-1])
+        print("==================================\n\n")
 
-        self.tempo_requisicao = time.perf_counter()
+        #self.tempo_requisicao = time.perf_counter()
         buffer_atual = self.retorna_tamanho_buffer()
 
         msg.add_quality_id(qualidade_selecionada)
